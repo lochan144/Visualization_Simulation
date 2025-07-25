@@ -1,0 +1,6 @@
+flask==2.3.3
+flask-socketio==5.3.6
+folium==0.14.0
+geopy==2.4.0
+python-engineio==4.7.1
+python-socketio==5.9.0

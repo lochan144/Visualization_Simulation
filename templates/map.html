@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NavIC + LoRa Real-Time Monitoring</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .container {
+            display: flex;
+            height: calc(100vh - 120px);
+            gap: 20px;
+            padding: 20px;
+        }
+        
+        .sidebar {
+            width: 350px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .map-container {
+            flex: 1;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        #map {
+            height: 100%;
+            width: 100%;
+            border-radius: 10px;
+        }
+        
+        .status-panel {
+            margin-bottom: 25px;
+        }
+        
+        .status-panel h3 {
+            color: #333;
+            margin: 0 0 15px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #eee;
+            font-size: 1.2em;
+        }
+        
+        .status-item {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        
+        .status-item.alert {
+            border-left-color: #e74c3c;
+            background: #fdf2f2;
+        }
+        
+        .status-item.safe {
+            border-left-color: #27ae60;
+            background: #f2fdf5;
+        }
+        
+        .status-value {
+            font-weight: bold;
+            color: #2c3e50;
+            font-size: 1.1em;
+        }
+        
+        .status-label {
+            color: #666;
+            font-size: 0.9em;
+            margin-bottom: 5px;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+        
+        .connection-status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .connection-status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 10px;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-indicator.online {
+            background: #28a745;
+        }
+        
+        .status-indicator.offline {
+            background: #dc3545;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .cow-info {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .cow-detail {
+            background: white;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #eee;
+        }
+        
+        .update-timer {
+            text-align: center;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 8px;
+            margin-top: 20px;
+        }
+        
+        .timer-display {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #495057;
+        }
+        
+        .legend {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 20px;
+            border: 1px solid #ddd;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+        }
+        
+        .legend-marker {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            margin-right: 10px;
+        }
+        
+        .legend-marker.human {
+            background: #3388ff;
+        }
+        
+        .legend-marker.safe {
+            background: #28a745;
+        }
+        
+        .legend-marker.alert {
+            background: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛰️ NavIC + LoRa Live Monitoring</h1>
+        <p>Real-time livestock tracking with 2-minute updates</p>
+    </div>
+    
+    <div class="container">
+        <div class="sidebar">
+            <!-- Connection Status -->
+            <div id="connectionStatus" class="connection-status disconnected">
+                <div class="status-indicator offline"></div>
+                <span>Connecting to server...</span>
+            </div>
+            
+            <!-- System Status -->
+            <div class="status-panel">
+                <h3>📊 System Status</h3>
+                <div class="status-item">
+                    <div class="status-label">Last Update</div>
+                    <div class="status-value" id="lastUpdate">Initializing...</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Update Interval</div>
+                    <div class="status-value">2 minutes</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Active Alerts</div>
+                    <div class="status-value" id="activeAlerts">0</div>
+                </div>
+            </div>
+            
+            <!-- Human Position -->
+            <div class="status-panel">
+                <h3>👤 Human Position (NavIC)</h3>
+                <div class="status-item">
+                    <div class="status-label">Coordinates</div>
+                    <div class="status-value" id="humanCoords">Loading...</div>
+                </div>
+                <div class="status-item">
+                    <div class="status-label">Positioning System</div>
+                    <div class="status-value">NavIC Satellite</div>
+                </div>
+            </div>
+            
+            <!-- Cow Information -->
+            <div class="status-panel">
+                <h3>🐄 Livestock Status (LoRa)</h3>
+                <div id="cowStatus">
+                    Loading cow information...
+                </div>
+            </div>
+            
+            <!-- Next Update Timer -->
+            <div class="update-timer">
+                <div style="margin-bottom: 10px; color: #666;">Next Update In:</div>
+                <div class="timer-display" id="updateTimer">--:--</div>
+            </div>
+            
+            <!-- Map Legend -->
+            <div class="legend">
+                <h4 style="margin: 0 0 10px 0;">Map Legend</h4>
+                <div class="legend-item">
+                    <div class="legend-marker human"></div>
+                    <span>Human (NavIC)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-marker safe"></div>
+                    <span>Cow - Safe (≤100m)</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-marker alert"></div>
+                    <span>Cow - Alert (>100m)</span>
+                </div>
+            </div>
+        </div>
+        
+        <div class="map-container">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <script>
+        // Initialize map
+        let map;
+        let humanMarker;
+        let cowMarkers = [];
+        let socket;
+        let updateTimer;
+        let timeRemaining = 120; // 2 minutes in seconds
+        
+        function initializeMap() {
+            // Default center (Bangalore)
+            map = L.map('map').setView([12.9716, 77.5946], 15);
+            
+            // Add tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            
+            console.log('Map initialized');
+        }
+        
+        function initializeSocket() {
+            socket = io();
+            
+            socket.on('connect', function() {
+                console.log('Connected to server');
+                updateConnectionStatus(true);
+            });
+            
+            socket.on('disconnect', function() {
+                console.log('Disconnected from server');
+                updateConnectionStatus(false);
+            });
+            
+            socket.on('position_update', function(data) {
+                console.log('Received position update:', data);
+                updateMapMarkers(data);
+                updateSidebar(data);
+                resetUpdateTimer();
+            });
+            
+            socket.on('system_status', function(data) {
+                console.log('System status:', data);
+                updateSystemStatus(data);
+            });
+        }
+        
+        function updateConnectionStatus(connected) {
+            const statusEl = document.getElementById('connectionStatus');
+            const indicator = statusEl.querySelector('.status-indicator');
+            const text = statusEl.querySelector('span');
+            
+            if (connected) {
+                statusEl.className = 'connection-status connected';
+                indicator.className = 'status-indicator online';
+                text.textContent = 'Connected - Live Updates Active';
+            } else {
+                statusEl.className = 'connection-status disconnected';
+                indicator.className = 'status-indicator offline';
+                text.textContent = 'Disconnected - Attempting Reconnection';
+            }
+        }
+        
+        function updateMapMarkers(data) {
+            // Clear existing markers
+            if (humanMarker) {
+                map.removeLayer(humanMarker);
+            }
+            cowMarkers.forEach(marker => map.removeLayer(marker));
+            cowMarkers = [];
+            
+            // Add human marker (NavIC position)
+            if (data.human) {
+                const humanPos = [data.human.lat, data.human.lon];
+                humanMarker = L.marker(humanPos, {
+                    icon: L.divIcon({
+                        html: '👤',
+                        className: 'human-marker',
+                        iconSize: [30, 30],
+                        iconAnchor: [15, 15]
+                    })
+                }).addTo(map);
+                
+                humanMarker.bindPopup(`
+                    <b>Human Position (NavIC)</b><br>
+                    Coordinates: ${data.human.lat.toFixed(6)}, ${data.human.lon.toFixed(6)}<br>
+                    Time: ${new Date(data.human.timestamp).toLocaleTimeString()}<br>
+                    System: ${data.human.positioning_system}
+                `);
+                
+                // Center map on human position
+                map.setView(humanPos, map.getZoom());
+            }
+            
+            // Add cow markers (LoRa positions)
+            if (data.cows) {
+                data.cows.forEach((cow, index) => {
+                    const cowPos = [cow.lat, cow.lon];
+                    const distance = cow.distance || 0;
+                    const status = cow.status || 'unknown';
+                    
+                    // Choose marker color based on status
+                    const markerColor = status === 'alert' ? '#dc3545' : '#28a745';
+                    
+                    const cowMarker = L.circleMarker(cowPos, {
+                        radius: 8,
+                        fillColor: markerColor,
+                        color: '#fff',
+                        weight: 2,
+                        opacity: 1,
+                        fillOpacity: 0.8
+                    }).addTo(map);
+                    
+                    cowMarker.bindPopup(`
+                        <b>Cow #${cow.id} (LoRa)</b><br>
+                        Coordinates: ${cow.lat.toFixed(6)}, ${cow.lon.toFixed(6)}<br>
+                        Distance from Human: ${distance.toFixed(1)}m<br>
+                        Status: <span style="color: ${markerColor}; font-weight: bold;">${status.toUpperCase()}</span><br>
+                        RSSI: ${cow.rssi} dBm<br>
+                        Signal Quality: ${cow.signal_quality}<br>
+                        Time: ${new Date(cow.timestamp).toLocaleTimeString()}
+                    `);
+                    
+                    cowMarkers.push(cowMarker);
+                });
+            }
+        }
+        
+        function updateSidebar(data) {
+            // Update last update time
+            document.getElementById('lastUpdate').textContent = 
+                new Date(data.system_time).toLocaleTimeString();
+            
+            // Update human coordinates
+            if (data.human) {
+                document.getElementById('humanCoords').textContent = 
+                    `${data.human.lat.toFixed(6)}, ${data.human.lon.toFixed(6)}`;
+            }
+            
+            // Update cow status
+            const cowStatusEl = document.getElementById('cowStatus');
+            let alertCount = 0;
+            
+            if (data.cows && data.cows.length > 0) {
+                let cowHtml = '';
+                
+                data.cows.forEach(cow => {
+                    const status = cow.status || 'unknown';
+                    const statusClass = status === 'alert' ? 'alert' : 'safe';
+                    if (status === 'alert') alertCount++;
+                    
+                    cowHtml += `
+                        <div class="status-item ${statusClass}">
+                            <div class="status-label">Cow #${cow.id}</div>
+                            <div class="cow-info">
+                                <div class="cow-detail">
+                                    <strong>Distance:</strong><br>
+                                    ${(cow.distance || 0).toFixed(1)}m
+                                </div>
+                                <div class="cow-detail">
+                                    <strong>Status:</strong><br>
+                                    ${status.toUpperCase()}
+                                </div>
+                                <div class="cow-detail">
+                                    <strong>RSSI:</strong><br>
+                                    ${cow.rssi} dBm
+                                </div>
+                                <div class="cow-detail">
+                                    <strong>Signal:</strong><br>
+                                    ${cow.signal_quality}
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                cowStatusEl.innerHTML = cowHtml;
+            } else {
+                cowStatusEl.innerHTML = '<div class="status-item">No cow data available</div>';
+            }
+            
+            // Update alert count
+            document.getElementById('activeAlerts').textContent = alertCount;
+        }
+        
+        function updateSystemStatus(data) {
+            if (data.message) {
+                console.log('System message:', data.message);
+            }
+        }
+        
+        function startUpdateTimer() {
+            updateTimer = setInterval(() => {
+                timeRemaining--;
+                
+                if (timeRemaining <= 0) {
+                    timeRemaining = 120; // Reset to 2 minutes
+                }
+                
+                const minutes = Math.floor(timeRemaining / 60);
+                const seconds = timeRemaining % 60;
+                document.getElementById('updateTimer').textContent = 
+                    `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
+        
+        function resetUpdateTimer() {
+            timeRemaining = 120; // Reset to 2 minutes
+        }
+        
+        // Initialize everything when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeMap();
+            initializeSocket();
+            startUpdateTimer();
+            
+            // Request initial data
+            if (socket) {
+                socket.emit('request_update');
+            }
+        });
+        
+        // Handle page visibility changes
+        document.addEventListener('visibilitychange', function() {
+            if (!document.hidden && socket && socket.connected) {
+                socket.emit('request_update');
+            }
+        });
+        
+        // Custom marker styles
+        const style = document.createElement('style');
+        style.textContent = `
+            .human-marker {
+                background: transparent !important;
+                border: none !important;
+                display: flex !important;
+                justify-content: center !important;
+                align-items: center !important;
+                font-size: 20px !important;
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
