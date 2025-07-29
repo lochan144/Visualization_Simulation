@@ -39,3 +39,7 @@ RSSI_MAX = -30   # Maximum RSSI value (dBm)
 HOST = 'localhost'
 PORT = 5000
 DEBUG = True
+
+# Fixed position mode
+FIXED_POSITION_MODE = True  # Set to True to keep human at fixed location
+FIXED_HUMAN_COORDS = (12.9183899, 77.5917152)  # Fixed coordinates when in fixed mode

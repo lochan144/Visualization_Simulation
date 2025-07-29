@@ -34,6 +34,11 @@ class PositionSimulator:
         Returns:
             Tuple of (latitude, longitude) for current human position
         """
+        # Check if fixed position mode is enabled
+        if config.FIXED_POSITION_MODE:
+            self.human_pos = config.FIXED_HUMAN_COORDS
+            return self.human_pos
+            
         if base_lat is None:
             base_lat = self.base_lat
         if base_lon is None:
